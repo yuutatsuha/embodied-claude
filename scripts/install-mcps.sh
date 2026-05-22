@@ -9,6 +9,7 @@
 #   - `tts-mcp` uses `--extra all` so both ElevenLabs and VOICEVOX integrations are pulled in.
 #   - `wifi-cam-mcp` uses `--extra transcribe` so Whisper-based speech recognition is available.
 #   - `sociality-mcp` is a uv workspace; its `packages/*` sub-MCPs are resolved automatically.
+#   - `memory-mcp` pre-downloads its embedding model so the first remember() doesn't lazy-fail.
 
 set -euo pipefail
 
@@ -38,6 +39,22 @@ extras_for() {
   esac
 }
 
+warm_for() {
+  case "$1" in
+    memory-mcp)
+      echo "    ↳ pre-downloading embedding model (honors \$MEMORY_EMBEDDING_MODEL)"
+      (cd memory-mcp && uv run python -c "
+from memory_mcp.config import MemoryConfig
+from memory_mcp.embedding import E5EmbeddingFunction
+model = MemoryConfig.from_env().embedding_model
+print(f'  warming {model}')
+E5EmbeddingFunction(model)._load_model()
+print('  done')
+")
+      ;;
+  esac
+}
+
 for dir in "${MCP_DIRS[@]}"; do
   if [ ! -f "$dir/pyproject.toml" ]; then
     echo "⚠️  skipping $dir (no pyproject.toml)"
@@ -47,6 +64,7 @@ for dir in "${MCP_DIRS[@]}"; do
   echo ""
   echo "==> $dir  (uv sync $extra $DEV_FLAG)"
   (cd "$dir" && uv sync $extra $DEV_FLAG)
+  warm_for "$dir"
 done
 
 echo ""
