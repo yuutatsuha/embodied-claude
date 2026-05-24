@@ -4,6 +4,9 @@
 # heartbeat-daemon.sh が書き出した state file を読んでコンテキストに注入する
 # 自前で計測せず、読み取り→整形→出力するだけの軽量版
 
+# タイムゾーンを JST に固定（date コマンドが UTC を返さないように）
+export TZ="Asia/Tokyo"
+
 STATE_FILE="/tmp/interoception_state.json"
 
 # Smartwatch heart rate cache (updated by any smartwatch integration's cron job)
