@@ -136,6 +136,26 @@ class TestGenerateConfig:
         assert "rtsp://admin:only_pass@192.168.1.100:554/stream1" in content
         assert "tapo://only_pass@192.168.1.100" in content
 
+    def test_special_chars_in_password_are_url_encoded(self, tmp_path):
+        # A '#' in the password would otherwise parse as a URL fragment and drop
+        # the host (observed as `dial tcp :8800: connection refused`).
+        config_path = tmp_path / "go2rtc.yaml"
+        generate_config(
+            config_path=config_path,
+            stream_name="tapo_cam",
+            camera_host="192.168.1.100",
+            username="user@home",
+            password="local#pass",
+            cloud_password="#3zq*Etp#DGp",
+        )
+        content = config_path.read_text()
+        # raw special chars must not leak into the URLs
+        assert "#3zq*Etp#DGp" not in content
+        assert "local#pass" not in content
+        # encoded forms present, host preserved
+        assert "tapo://%233zq%2AEtp%23DGp@192.168.1.100" in content
+        assert "rtsp://user%40home:local%23pass@192.168.1.100:554/stream1" in content
+
     def test_overwrites_existing(self, tmp_path):
         config_path = tmp_path / "go2rtc.yaml"
         config_path.write_text("old content")

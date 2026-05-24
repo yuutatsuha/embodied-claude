@@ -9,6 +9,7 @@ import subprocess
 import urllib.request
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -143,11 +144,17 @@ def generate_config(
     config_path.parent.mkdir(parents=True, exist_ok=True)
     resolved_ffmpeg = ffmpeg_bin or "ffmpeg"
     tapo_password = cloud_password if cloud_password is not None else password
+    # URL-encode credentials: passwords often contain characters such as '#', '@',
+    # ':' or '/' that otherwise corrupt the stream URL (e.g. a leading '#' makes the
+    # rest parse as a URL fragment, dropping the host).
+    enc_username = quote(username, safe="")
+    enc_password = quote(password, safe="")
+    enc_tapo_password = quote(tapo_password, safe="") if tapo_password else ""
     content = (
         f"streams:\n"
         f"  {stream_name}:\n"
-        f"    - rtsp://{username}:{password}@{camera_host}:554/stream1\n"
-        f"    - tapo://{tapo_password}@{camera_host}\n"
+        f"    - rtsp://{enc_username}:{enc_password}@{camera_host}:554/stream1\n"
+        f"    - tapo://{enc_tapo_password}@{camera_host}\n"
         f"\n"
         f"ffmpeg:\n"
         f"  bin: {resolved_ffmpeg}\n"
