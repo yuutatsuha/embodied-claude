@@ -11,6 +11,9 @@ WINDOW_SIZE=12  # 直近12エントリ（5秒×12=1分間）
 # --- OS判定 ---
 OS_TYPE="$(uname -s)"
 
+# --- タイムゾーンを JST に固定（phase / timestamp が UTC にならないように） ---
+export TZ="Asia/Tokyo"
+
 # --- 時刻 ---
 CURRENT_TIME=$(date '+%Y-%m-%dT%H:%M:%S%z')
 HOUR=$(date '+%H')
