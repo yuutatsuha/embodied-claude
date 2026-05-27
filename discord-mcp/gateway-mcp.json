@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "discord": {
+      "command": "/home/ytsuhako/.local/bin/uv",
+      "args": ["--directory", "/home/ytsuhako/projects/embodied-claude/discord-mcp", "run", "discord-mcp"]
+    },
+    "tts": {
+      "command": "/home/ytsuhako/.local/bin/uv",
+      "args": ["--directory", "/home/ytsuhako/projects/embodied-claude/tts-mcp", "run", "tts-mcp"]
+    },
+    "memory": {
+      "command": "/home/ytsuhako/.local/bin/uv",
+      "args": ["--directory", "/home/ytsuhako/projects/embodied-claude/memory-mcp", "run", "memory-mcp"],
+      "env": { "MEMORY_HTTP_PORT": "18901" }
+    },
+    "wifi-cam": {
+      "command": "/home/ytsuhako/.local/bin/uv",
+      "args": ["--directory", "/home/ytsuhako/projects/embodied-claude/wifi-cam-mcp", "run", "wifi-cam-mcp"]
+    }
+  }
+}

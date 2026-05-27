@@ -1,0 +1,15 @@
+[Unit]
+Description=Embodied Claude Discord gateway (wakes Claude on new #kokone messages)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/embodied-claude
+Environment=CLAUDE_BIN=%h/.local/bin/claude
+ExecStart=%h/.local/bin/uv --directory %h/projects/embodied-claude/discord-mcp run discord-gateway
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
