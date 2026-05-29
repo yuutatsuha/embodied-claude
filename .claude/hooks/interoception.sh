@@ -13,9 +13,14 @@ STATE_FILE="/tmp/interoception_state.json"
 # The file path is smartwatch-generic; Garmin / Apple Watch / Fitbit integrations
 # are expected to write their latest HR to the same location.
 SW_HR_FILE="/tmp/sw_hr_latest.txt"
+SW_HR_MAX_AGE=1200  # 20分以上古い心拍は出さない（受信が止まった時の残骸を相手の鼓動として注入しない）
 COMPANION_HR=""
 if [ -f "$SW_HR_FILE" ]; then
-    COMPANION_HR=$(cat "$SW_HR_FILE" 2>/dev/null)
+    _now=$(date +%s)
+    _mtime=$(stat -c %Y "$SW_HR_FILE" 2>/dev/null || stat -f %m "$SW_HR_FILE" 2>/dev/null || echo 0)
+    if [ "$_mtime" -gt 0 ] && [ $((_now - _mtime)) -le "$SW_HR_MAX_AGE" ]; then
+        COMPANION_HR=$(cat "$SW_HR_FILE" 2>/dev/null)
+    fi
 fi
 
 # state file がなければフォールバック（デーモン未起動時）
