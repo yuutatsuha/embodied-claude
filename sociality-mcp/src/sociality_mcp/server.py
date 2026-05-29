@@ -783,8 +783,19 @@ def main() -> None:
         asyncio.set_event_loop(loop)
 
         async def _serve() -> None:
-            server = await asyncio.start_server(_handle_http, "127.0.0.1", http_port)
             import logging
+
+            try:
+                server = await asyncio.start_server(_handle_http, "127.0.0.1", http_port)
+            except OSError as e:
+                # Best-effort singleton: Claude spawns one instance per session but only
+                # one can bind the port. If it's taken, skip the HTTP endpoint (the first
+                # instance owns it) and let this instance serve MCP over stdio cleanly.
+                logging.getLogger("sociality-mcp").warning(
+                    f"HTTP endpoint not started on 127.0.0.1:{http_port} ({e}); "
+                    "another instance likely owns it. Serving MCP over stdio only."
+                )
+                return
             logging.getLogger("sociality-mcp").info(f"HTTP endpoint on 127.0.0.1:{http_port}")
             async with server:
                 await server.serve_forever()
