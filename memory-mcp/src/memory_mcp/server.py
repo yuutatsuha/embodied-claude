@@ -1688,21 +1688,38 @@ Date Range:
 
     async def run(self) -> None:
         """Run the MCP server."""
-        async with self.run_context():
-            # Start lightweight HTTP recall server
-            http_port = int(__import__("os").environ.get("MEMORY_HTTP_PORT", "18900"))
-            http_server = await asyncio.start_server(
-                self._handle_http_recall, "127.0.0.1", http_port
-            )
-            logger.info(f"HTTP recall endpoint listening on 127.0.0.1:{http_port}")
+        import os
 
-            async with http_server:
+        async with self.run_context():
+            # Start lightweight HTTP recall server (best-effort singleton).
+            # Claude spawns one stdio instance per session, but only one process can
+            # bind the port. If it's already owned by another instance, skip the HTTP
+            # endpoint and still serve MCP over stdio — otherwise every session after
+            # the first crashes on bind and exposes no memory tools at all.
+            http_port = int(os.environ.get("MEMORY_HTTP_PORT", "18900"))
+            http_server = None
+            try:
+                http_server = await asyncio.start_server(
+                    self._handle_http_recall, "127.0.0.1", http_port
+                )
+                logger.info(f"HTTP recall endpoint listening on 127.0.0.1:{http_port}")
+            except OSError as e:
+                logger.warning(
+                    f"HTTP recall endpoint not started on 127.0.0.1:{http_port} ({e}); "
+                    "another instance likely owns it. Serving MCP over stdio only."
+                )
+
+            try:
                 async with stdio_server() as (read_stream, write_stream):
                     await self._server.run(
                         read_stream,
                         write_stream,
                         self._server.create_initialization_options(),
                     )
+            finally:
+                if http_server is not None:
+                    http_server.close()
+                    await http_server.wait_closed()
 
 
 def main() -> None:
