@@ -39,6 +39,9 @@ ENV/
 .env.local
 .env.*.local
 
+# env-sensor firmware secrets (WiFi creds / device config live on-device only)
+env-sensor-mcp/firmware/config.py
+
 # MCP config (may contain API keys)
 .mcp.json
 
@@ -75,6 +78,10 @@ schedule.conf
 desires.conf
 desires.json
 
+# Per-instance autonomous behavior notes (track last-run dates / continuation; personal scratch)
+ROUTINES.md
+TODO.md
+
 # Google API credentials (NEVER commit)
 scripts/credentials.json
 scripts/token.json
@@ -87,7 +94,19 @@ devices.json
 
 # Reference implementations (cloned repos for study)
 references/
+# Reference material dropped in for study (e.g. copyrighted workbooks; private)
+reference/
+
+# Restore/sync scratch logs
+.restore-uv-sync.log
 
 # Per-person seeds for relationship-mcp (contain private facts)
 .local/
 
+
+# Discord image attachment cache (downloaded by discord-mcp fetch_recent_images)
+.discord-attachments/
+
+# Discord gateway runtime logs and session id (regenerated at runtime)
+.discord-gateway-logs/
+discord-session-id

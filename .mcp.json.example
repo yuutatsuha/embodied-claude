@@ -49,6 +49,15 @@
         "X_ACCESS_TOKEN_SECRET": "your-x-access-token-secret"
       }
     },
+    "discord": {
+      "command": "uv",
+      "args": ["run", "--directory", "discord-mcp", "discord-mcp"],
+      "env": {
+        "DISCORD_BOT_TOKEN": "your-discord-bot-token",
+        "DISCORD_CHANNEL_ID": "your-default-channel-id",
+        "DISCORD_GUILD_ID": "your-guild-id"
+      }
+    },
     "sociality": {
       "command": "uv",
       "args": ["run", "--directory", "sociality-mcp", "sociality-mcp"]

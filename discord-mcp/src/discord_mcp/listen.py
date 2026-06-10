@@ -1,14 +1,17 @@
 """discord-voice listen — record one turn from the voice channel and transcribe it (ja).
 
 Stage 2 (first half) of Discord voice: kokone's ear. Joins the voice channel, records
-for a fixed window, then transcribes with faster-whisper (CPU, int8 — WSL2 has no CUDA
-here). Prints the recognized text. Pairs with voice.py (the mouth) for a manual
-conversation turn:
+one turn, then transcribes with faster-whisper (CPU, int8 — WSL2 has no CUDA here).
+By default it records until the speaker goes quiet (silence-based end-of-turn) instead
+of cutting off at a fixed time, so a turn can be as long or short as the speaker needs.
+Prints the recognized text. Pairs with voice.py (the mouth) for a manual conversation
+turn:
 
     listen.py  ->  (read transcript)  ->  voice.py reply
 
 Usage:
-    uv run python -m discord_mcp.listen <voice_channel_id> [seconds]
+    uv run python -m discord_mcp.listen <voice_channel_id> [max_seconds]   # stop on silence
+    uv run python -m discord_mcp.listen <voice_channel_id> fixed <seconds> # fixed window
 
 Requires discord-ext-voice-recv + PyNaCl + ffmpeg. The bot needs Connect on the channel.
 """
@@ -18,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import discord
@@ -124,6 +128,84 @@ async def record_once(channel_id: int, seconds: float) -> str | None:
     return captured.get("path")
 
 
+class _SilenceAwareWaveSink(voice_recv.WaveSink):
+    """WaveSink that also stamps when audio last arrived, for end-of-turn detection.
+
+    A plain WaveSink (no SilenceGenerator) calls write() only when a real RTP packet is
+    received. Discord stops sending packets shortly after a speaker goes quiet, so
+    'time since last write' is a usable voice-activity signal. The stamp is a single
+    float written from the receive thread and read from the event loop — atomic enough
+    under CPython's GIL that no lock is needed.
+    """
+
+    def __init__(self, destination: str) -> None:
+        super().__init__(destination)
+        self.last_write: float | None = None
+
+    def write(self, user, data) -> None:  # noqa: ANN001
+        super().write(user, data)
+        self.last_write = time.monotonic()
+
+
+async def record_until_silence(
+    channel_id: int,
+    *,
+    max_seconds: float = 45.0,
+    silence_timeout: float = 2.0,
+    start_timeout: float = 20.0,
+) -> str | None:
+    """Join the voice channel and record one turn, stopping when the speaker goes quiet.
+
+    Ends when no audio packet has arrived for `silence_timeout` seconds (end of a turn)
+    or after `max_seconds` total, whichever comes first. If nobody speaks within
+    `start_timeout`, gives up so the caller can retry instead of hanging.
+    """
+    _ensure_opus()
+    _patch_voice_recv_for_dave()
+    intents = discord.Intents.default()
+    client = discord.Client(intents=intents)
+    captured: dict[str, str] = {}
+
+    @client.event
+    async def on_ready() -> None:
+        vc: voice_recv.VoiceRecvClient | None = None
+        try:
+            channel = await client.fetch_channel(channel_id)
+            if not isinstance(channel, discord.VoiceChannel):
+                raise RuntimeError(f"channel {channel_id} is not a voice channel")
+
+            vc = await channel.connect(cls=voice_recv.VoiceRecvClient)
+
+            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            tmp.close()
+            sink = _SilenceAwareWaveSink(tmp.name)
+            vc.listen(sink)
+
+            start = time.monotonic()
+            while True:
+                await asyncio.sleep(0.2)
+                now = time.monotonic()
+                if now - start >= max_seconds:
+                    break
+                if sink.last_write is None:
+                    if now - start >= start_timeout:
+                        break  # nobody spoke
+                    continue
+                if now - sink.last_write >= silence_timeout:
+                    break  # speaker went quiet -> end of turn
+
+            vc.stop_listening()
+            await asyncio.sleep(0.2)  # flush the last frames into the file
+            captured["path"] = tmp.name
+        finally:
+            if vc is not None:
+                await vc.disconnect()
+            await client.close()
+
+    await client.start(config.get_token())
+    return captured.get("path")
+
+
 def transcribe(wav_path: str) -> str:
     """Transcribe a WAV file to Japanese text with faster-whisper (CPU)."""
     from faster_whisper import WhisperModel
@@ -134,13 +216,26 @@ def transcribe(wav_path: str) -> str:
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("usage: python -m discord_mcp.listen <voice_channel_id> [seconds]", file=sys.stderr)
+    args = sys.argv[1:]
+    if not args:
+        print(
+            "usage:\n"
+            "  python -m discord_mcp.listen <voice_channel_id> [max_seconds]   "
+            "# stop when the speaker goes quiet (default)\n"
+            "  python -m discord_mcp.listen <voice_channel_id> fixed <seconds> "
+            "# fixed-length window (fallback)",
+            file=sys.stderr,
+        )
         raise SystemExit(2)
-    channel_id = int(sys.argv[1])
-    seconds = float(sys.argv[2]) if len(sys.argv) > 2 else 6.0
 
-    wav_path = asyncio.run(record_once(channel_id, seconds))
+    channel_id = int(args[0])
+    if len(args) >= 2 and args[1] == "fixed":
+        seconds = float(args[2]) if len(args) > 2 else 6.0
+        wav_path = asyncio.run(record_once(channel_id, seconds))
+    else:
+        max_seconds = float(args[1]) if len(args) > 1 else 45.0
+        wav_path = asyncio.run(record_until_silence(channel_id, max_seconds=max_seconds))
+
     if not wav_path or not Path(wav_path).exists():
         print("[no audio captured]", file=sys.stderr)
         raise SystemExit(1)

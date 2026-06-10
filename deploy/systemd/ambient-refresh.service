@@ -1,0 +1,12 @@
+[Unit]
+Description=M5 env-sensor ambient cache refresh (skin/touch for interoception)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/bash /home/ytsuhako/projects/embodied-claude/.claude/hooks/ambient-refresh.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

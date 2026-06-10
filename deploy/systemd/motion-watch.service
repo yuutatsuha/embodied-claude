@@ -1,0 +1,12 @@
+[Unit]
+Description=Motion-watch poem daemon (notices cat movement, posts tanka/poem to #宙だより)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/bash /home/ytsuhako/projects/embodied-claude/.claude/hooks/motion-watch.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

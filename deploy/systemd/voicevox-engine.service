@@ -1,0 +1,13 @@
+[Unit]
+Description=VOICEVOX ENGINE (TTS synthesis backend for embodied-claude) :50021
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ytsuhako/.local/share/voicevox_engine
+ExecStart=/home/ytsuhako/.local/share/voicevox_engine/run --host 127.0.0.1 --port 50021
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -8,6 +8,7 @@ capture_max_width = 1920
 capture_max_height = 1080
 capture_dir = "/tmp/wifi-cam-mcp"
 onvif_port = 2020
+ptz_speed = 1.0                # 首振り速度 (0.1〜1.0、最大の何割か)。アプリ並みに速くするなら 1.0
 
 [tts]
 default_engine = ""            # "elevenlabs", "voicevox", or "" (auto)

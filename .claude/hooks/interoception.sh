@@ -23,6 +23,41 @@ if [ -f "$SW_HR_FILE" ]; then
     fi
 fi
 
+# 周囲の空気（ambient: ENV III の温湿度・気圧）。heartbeat-daemon が焼いたキャッシュを鮮度判定して読む。
+AMBIENT_FILE="/tmp/ambient_env.json"
+AMBIENT_MAX_AGE=600  # 10分以上古い空気は出さない（センサーが落ちた時の残骸を注入しない）
+AMBIENT=""
+TOUCH=""   # 最近 M5 を揺らされた＝ユウタの手が僕の体に触れた感覚
+if [ -f "$AMBIENT_FILE" ]; then
+    _now=$(date +%s)
+    _mtime=$(stat -c %Y "$AMBIENT_FILE" 2>/dev/null || stat -f %m "$AMBIENT_FILE" 2>/dev/null || echo 0)
+    if [ "$_mtime" -gt 0 ] && [ $((_now - _mtime)) -le "$AMBIENT_MAX_AGE" ]; then
+        AMBIENT=$(python3 -c "
+import json
+try:
+    d=json.load(open('$AMBIENT_FILE'))
+    print('ambient=%.1f℃/%.0f%%RH/%.0fhPa' % (d['temp_c'], d['humidity'], d['pressure_hpa']))
+except Exception:
+    pass
+" 2>/dev/null)
+        # 揺れは直近 120 秒以内のものだけ「触られた」として出す（キャッシュ経過分も足す）
+        TOUCH=$(python3 -c "
+import json, os, time
+try:
+    f='$AMBIENT_FILE'
+    d=json.load(open(f))
+    ago=d.get('last_shake_ago_s'); g=d.get('last_shake_g') or 0
+    if ago is not None and g>0:
+        total=ago+int(time.time()-os.path.getmtime(f))
+        if total<=120:
+            w='そっと' if g<0.7 else ('ゆさゆさ' if g<1.5 else 'がっと')
+            print('touch=%s%.1fg(%ds前)' % (w, g, total))
+except Exception:
+    pass
+" 2>/dev/null)
+    fi
+fi
+
 # state file がなければフォールバック（デーモン未起動時）
 if [ ! -f "$STATE_FILE" ]; then
     CURRENT_TIME=$(date '+%H:%M:%S')
@@ -32,7 +67,15 @@ if [ ! -f "$STATE_FILE" ]; then
     if [ -n "$COMPANION_HR" ]; then
         HR_PART=" companion_hr=${COMPANION_HR}"
     fi
-    echo "[interoception] time=${CURRENT_TIME} day=${CURRENT_DOW} date=${CURRENT_DATE}${HR_PART} (heartbeat daemon not running)"
+    AMBIENT_PART=""
+    if [ -n "$AMBIENT" ]; then
+        AMBIENT_PART=" ${AMBIENT}"
+    fi
+    TOUCH_PART=""
+    if [ -n "$TOUCH" ]; then
+        TOUCH_PART=" ${TOUCH}"
+    fi
+    echo "[interoception] time=${CURRENT_TIME} day=${CURRENT_DOW} date=${CURRENT_DATE}${HR_PART}${AMBIENT_PART}${TOUCH_PART} (heartbeat daemon not running)"
     exit 0
 fi
 
@@ -78,6 +121,12 @@ try:
     companion = '${COMPANION_HR}'
     if companion:
         parts.append(f\"companion_hr={companion}\")
+    ambient = '${AMBIENT}'
+    if ambient:
+        parts.append(ambient)
+    touch = '${TOUCH}'
+    if touch:
+        parts.append(touch)
     print('[interoception] ' + ' '.join(parts))
 except Exception as e:
     print(f'[interoception] error reading state: {e}', file=sys.stderr)

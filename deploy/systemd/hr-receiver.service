@@ -1,0 +1,13 @@
+[Unit]
+Description=Apple Watch heart-rate receiver (Health Auto Export -> :8787)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ytsuhako/projects/embodied-claude
+ExecStart=/usr/bin/python3 /home/ytsuhako/projects/embodied-claude/.claude/hooks/hr-receiver.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

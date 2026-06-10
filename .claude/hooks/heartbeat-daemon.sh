@@ -96,6 +96,16 @@ case "$OS_TYPE" in
         ;;
 esac
 
+# --- 周囲の空気（ambient: M5StickC Plus2 + ENV III の pull エンドポイント） ---
+# 取得できたらキャッシュに焼くだけ。失敗時は古いキャッシュを残す（interoception.sh 側で鮮度判定）。
+# URL は AMBIENT_ENV_URL で差し替え可能。
+AMBIENT_ENV_URL="${AMBIENT_ENV_URL:-http://192.168.3.178/env}"
+AMBIENT_FILE="/tmp/ambient_env.json"
+_ambient=$(curl -s --max-time 2 "$AMBIENT_ENV_URL" 2>/dev/null)
+if [ -n "$_ambient" ] && echo "$_ambient" | grep -q '"temp_c"'; then
+    echo "$_ambient" > "${AMBIENT_FILE}.tmp" && mv "${AMBIENT_FILE}.tmp" "$AMBIENT_FILE"
+fi
+
 # --- ring buffer 管理 ---
 # 既存のstate fileからwindowを読み出し、新エントリを追加、古いのを削除
 if [ -f "$STATE_FILE" ]; then

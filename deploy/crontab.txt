@@ -1,0 +1,2 @@
+# 宙(そら) 自律 Heartbeat — 20分ごと。script内でJST固定&スケジュールゲート。停止: この行を消す
+*/20 * * * * /home/ytsuhako/projects/embodied-claude/autonomous-action.sh >/dev/null 2>&1

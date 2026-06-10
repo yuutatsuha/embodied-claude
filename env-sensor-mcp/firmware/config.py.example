@@ -1,0 +1,19 @@
+# Copy to config.py and fill in. config.py is gitignored (holds WiFi creds).
+# Both config.py and main.py are uploaded to the device:
+#   mpremote connect /dev/ttyACM0 fs cp config.py :config.py
+#   mpremote connect /dev/ttyACM0 fs cp main.py   :main.py
+
+WIFI_SSID = "your-2.4GHz-ssid"   # ESP32 is 2.4GHz only
+WIFI_PASS = "your-wifi-password"
+
+# Static IP so the pull endpoint never moves.
+USE_STATIC_IP = True
+IP      = "192.168.3.178"
+NETMASK = "255.255.255.0"
+GATEWAY = "192.168.3.1"
+DNS     = "192.168.3.1"
+
+HTTP_PORT = 80
+
+# Face style on the LCD: "pixel" (8-bit / retro) or "smooth" (round emoji).
+FACE_STYLE = "smooth"
