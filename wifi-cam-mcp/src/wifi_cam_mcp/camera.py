@@ -4,7 +4,9 @@ import asyncio
 import base64
 import io
 import logging
+import re
 import tempfile
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -13,7 +15,7 @@ from pathlib import Path
 from PIL import Image
 
 from ._behavior import get_behavior
-from .config import CameraConfig
+from .config import CameraConfig, _clamp_speed
 
 logger = logging.getLogger(__name__)
 
@@ -248,7 +250,9 @@ class TapoCamera:
     # Image capture
     # ------------------------------------------------------------------
 
-    async def capture_image(self, save_to_file: bool = True) -> CaptureResult:
+    async def capture_image(
+        self, save_to_file: bool = True, zoom: float = 1.0
+    ) -> CaptureResult:
         """Capture a snapshot from the camera.
 
         First tries ONVIF snapshot (fast, ~300ms). Falls back to RTSP
@@ -256,13 +260,18 @@ class TapoCamera:
 
         Args:
             save_to_file: If True, save image to disk as well
+            zoom: Digital zoom factor (1.0 = no zoom). Values > 1.0 crop the
+                center of the frame before resizing, enlarging the subject.
+                This camera has no optical zoom, so this is software-only.
 
         Returns:
             CaptureResult with base64 encoded image and metadata
         """
-        return await self._with_reconnect(self._capture_image_impl, save_to_file)
+        return await self._with_reconnect(self._capture_image_impl, save_to_file, zoom)
 
-    async def _capture_image_impl(self, save_to_file: bool) -> CaptureResult:
+    async def _capture_image_impl(
+        self, save_to_file: bool, zoom: float = 1.0
+    ) -> CaptureResult:
         """Internal capture implementation."""
         image_data = None
 
@@ -297,6 +306,17 @@ class TapoCamera:
         mount_mode = get_behavior("wifi-cam", "mount_mode", self._config.mount_mode)
         if mount_mode == "ceiling":
             image = image.rotate(180)
+
+        # Digital zoom: crop the center region before resizing so the subject
+        # fills more of the frame. No optical zoom on this camera, so quality
+        # drops as zoom rises — clamp to a sane max.
+        if zoom and zoom > 1.0:
+            zoom = min(zoom, 8.0)
+            crop_w = max(1, int(image.width / zoom))
+            crop_h = max(1, int(image.height / zoom))
+            left = (image.width - crop_w) // 2
+            top = (image.height - crop_h) // 2
+            image = image.crop((left, top, left + crop_w, top + crop_h))
 
         # Resize if needed
         if image.width > self._config.max_width or image.height > self._config.max_height:
@@ -457,17 +477,18 @@ class TapoCamera:
 
         try:
             ptz_mode = get_behavior("wifi-cam", "ptz_mode", self._config.ptz_mode)
+            speed = _clamp_speed(get_behavior("wifi-cam", "ptz_speed", self._config.ptz_speed))
 
             if ptz_mode == "relative":
-                await self._ptz_relative_move(pan_delta, tilt_delta)
+                await self._ptz_relative_move(pan_delta, tilt_delta, speed)
             elif ptz_mode == "continuous":
-                await self._ptz_continuous_move(pan_delta, tilt_delta, degrees)
+                await self._ptz_continuous_move(pan_delta, tilt_delta, degrees, speed)
             else:
                 # Auto: try RelativeMove, fall back to ContinuousMove
                 try:
-                    await self._ptz_relative_move(pan_delta, tilt_delta)
+                    await self._ptz_relative_move(pan_delta, tilt_delta, speed)
                 except Exception:
-                    await self._ptz_continuous_move(pan_delta, tilt_delta, degrees)
+                    await self._ptz_continuous_move(pan_delta, tilt_delta, degrees, speed)
 
             # Update software tracking as well
             match direction:
@@ -497,19 +518,35 @@ class TapoCamera:
                 message=f"Failed to move: {e!s}",
             )
 
-    async def _ptz_relative_move(self, pan_delta: float, tilt_delta: float) -> None:
-        """Move camera using ONVIF RelativeMove (Tapo, etc.)."""
-        await self._ptz_service.RelativeMove(
-            {
-                "ProfileToken": self._profile_token,
-                "Translation": {
-                    "PanTilt": {"x": pan_delta, "y": tilt_delta},
-                },
-            }
-        )
+    async def _ptz_relative_move(
+        self, pan_delta: float, tilt_delta: float, speed: float = 1.0
+    ) -> None:
+        """Move camera using ONVIF RelativeMove (Tapo, etc.).
+
+        Sends an explicit Speed vector so the move runs at `speed` (fraction of max)
+        instead of the camera's slower ONVIF default. Some firmwares reject the Speed
+        field on RelativeMove, so fall back to a plain move (default speed) if it errors.
+        """
+        translation = {"PanTilt": {"x": pan_delta, "y": tilt_delta}}
+        try:
+            await self._ptz_service.RelativeMove(
+                {
+                    "ProfileToken": self._profile_token,
+                    "Translation": translation,
+                    "Speed": {"PanTilt": {"x": speed, "y": speed}},
+                }
+            )
+        except Exception:
+            # Firmware rejected the Speed field — retry without it (default speed).
+            await self._ptz_service.RelativeMove(
+                {
+                    "ProfileToken": self._profile_token,
+                    "Translation": translation,
+                }
+            )
 
     async def _ptz_continuous_move(
-        self, pan_delta: float, tilt_delta: float, degrees: int
+        self, pan_delta: float, tilt_delta: float, degrees: int, speed: float = 1.0
     ) -> None:
         """Move camera using ONVIF ContinuousMove + Stop (Imou, etc.)."""
         # Normalize velocity direction to -1..1 range
@@ -518,14 +555,16 @@ class TapoCamera:
         # RelativeMove on some cameras (e.g. Imou vs Tapo)
         vx = -pan_delta / mag
         vy = tilt_delta / mag
-        # Duration proportional to degrees (calibrated for Imou Ranger 2C)
-        move_duration = max(0.3, degrees / 36.0)
+        # Travel = velocity × duration. The 36.0 constant was calibrated at velocity 0.5
+        # (Imou Ranger 2C), so scale the duration inversely with speed to keep the same
+        # sweep in degrees while the motor moves faster.
+        move_duration = max(0.3, (degrees / 36.0) * (0.5 / speed))
 
         await self._ptz_service.ContinuousMove(
             {
                 "ProfileToken": self._profile_token,
                 "Velocity": {
-                    "PanTilt": {"x": vx * 0.5, "y": vy * 0.5},
+                    "PanTilt": {"x": vx * speed, "y": vy * speed},
                 },
             }
         )
@@ -783,9 +822,92 @@ class TapoCamera:
         except ImportError:
             return "[Whisper not installed. Run: pip install openai-whisper]"
 
+        # 静かな部屋・カメラから離れた普通の声だと録音がノイズ床近くに沈み、
+        # whisper が空文字を返しがち。whisper に渡す前に音量を正規化して持ち上げる。
+        asr_path = await self._boost_audio_for_asr(audio_path)
+
         try:
             model = await asyncio.to_thread(whisper.load_model, "base")
-            result = await asyncio.to_thread(model.transcribe, audio_path, language="ja")
-            return result.get("text", "").strip()
+            result = await asyncio.to_thread(
+                model.transcribe,
+                asr_path,
+                language="ja",
+                condition_on_previous_text=False,
+                no_speech_threshold=0.6,
+                temperature=0.0,
+                fp16=False,
+            )
         except Exception as e:
             return f"[Transcription failed: {e!s}]"
+
+        return self._reject_hallucination(result)
+
+    @staticmethod
+    def _reject_hallucination(result: dict) -> str:
+        """音量ブーストの副作用で出る whisper の「幻聴」を弾いて空文字にする。
+
+        無音やノイズを増幅すると whisper が自信ありげに架空のテキスト
+        （多くは同一短文の大量反復）を生成することがある。言っていないことを
+        「聞いた」ことにしないよう、no_speech 確率が高いセグメントや、同一
+        フレーズの異常反復は捨てて空文字を返す。きれいな発話はそのまま通す。
+
+        Args:
+            result: whisper ``transcribe`` の戻り値（segments 付き）
+
+        Returns:
+            信頼できる文字起こし。幻聴・無音と判断したら空文字。
+        """
+        segments = result.get("segments") or []
+        if segments:
+            max_no_speech = max(s.get("no_speech_prob", 0.0) for s in segments)
+            if max_no_speech > 0.5:
+                return ""
+        text = (result.get("text") or "").strip()
+        parts = [p for p in re.split(r"[。、 　]", text) if p]
+        if len(parts) >= 6:
+            most_common, count = Counter(parts).most_common(1)[0]
+            if len(most_common) <= 12 and count / len(parts) > 0.5:
+                return ""
+        return text
+
+    async def _boost_audio_for_asr(self, audio_path: str) -> str:
+        """音量を正規化して文字起こしで拾いやすくした一時 WAV のパスを返す。
+
+        静かな環境やカメラから離れた発話は録音レベルが低く（ノイズ床近く）、
+        whisper が声を拾えないことがある。whisper に渡す前に ffmpeg の
+        ``loudnorm`` でラウドネスを持ち上げ、``highpass`` で低周波の暗騒音を
+        削ってから渡す。ffmpeg が無い・失敗した場合は元のパスを返す
+        （加工に失敗しても録音そのものは劣化させない）。
+
+        Args:
+            audio_path: 元の録音 WAV のパス
+
+        Returns:
+            正規化済み WAV のパス（失敗時は ``audio_path`` をそのまま）
+        """
+        boosted_path = f"{audio_path}.asr.wav"
+        cmd = [
+            "ffmpeg",
+            "-i",
+            audio_path,
+            "-af",
+            "highpass=f=100,loudnorm=I=-16:TP=-1.5:LRA=11",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "-y",
+            boosted_path,
+        ]
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(process.wait(), timeout=30.0)
+            if process.returncode == 0 and Path(boosted_path).exists():
+                return boosted_path
+        except Exception as e:
+            logger.info("ASR audio boost failed (%s), using original audio", e)
+        return audio_path

@@ -8,6 +8,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _clamp_speed(value: object, default: float = 1.0) -> float:
+    """Parse a PTZ speed and clamp it to the valid 0.1–1.0 fraction-of-max range."""
+    try:
+        speed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0.1, min(speed, 1.0))
+
+
 @dataclass(frozen=True)
 class CameraConfig:
     """Camera connection configuration."""
@@ -21,6 +30,9 @@ class CameraConfig:
     max_height: int = 1080
     mount_mode: str = "normal"  # "normal" (desktop) or "ceiling" (inverted)
     ptz_mode: str = "auto"  # "auto", "relative", or "continuous"
+    # PTZ move speed as a fraction of the camera's max (0.1–1.0). The ONVIF default
+    # (when no Speed is sent) is often slower than the vendor app; 1.0 = full speed.
+    ptz_speed: float = 1.0
 
     @classmethod
     def from_env(cls, prefix: str = "TAPO") -> "CameraConfig":
@@ -51,6 +63,9 @@ class CameraConfig:
             )
         max_width = int(os.getenv("CAPTURE_MAX_WIDTH", "1920"))
         max_height = int(os.getenv("CAPTURE_MAX_HEIGHT", "1080"))
+        ptz_speed = _clamp_speed(
+            os.getenv(f"{prefix}_PTZ_SPEED", "") or os.getenv("TAPO_PTZ_SPEED", "") or "1.0"
+        )
 
         if not host:
             raise ValueError(f"{prefix}_CAMERA_HOST environment variable is required")
@@ -67,6 +82,7 @@ class CameraConfig:
             stream_url=stream_url,
             mount_mode=mount_mode,
             ptz_mode=ptz_mode,
+            ptz_speed=ptz_speed,
             max_width=max_width,
             max_height=max_height,
         )

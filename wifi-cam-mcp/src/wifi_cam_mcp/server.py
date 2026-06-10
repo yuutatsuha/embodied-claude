@@ -42,10 +42,17 @@ class CameraMCPServer:
             tools = [
                 Tool(
                     name="see",
-                    description="See what's in front of you right now (using your eyes/camera). Returns the current view as an image. Use this when someone asks you to look at something or when you want to observe your surroundings.",
+                    description="See what's in front of you right now (using your eyes/camera). Returns the current view as an image. Use this when someone asks you to look at something or when you want to observe your surroundings. Pass 'zoom' (>1.0) for digital zoom to look closer at something — this is software crop-and-enlarge, not optical, so detail degrades at high zoom.",
                     inputSchema={
                         "type": "object",
-                        "properties": {},
+                        "properties": {
+                            "zoom": {
+                                "type": "number",
+                                "description": "Digital zoom factor. 1.0 = full view (default). 2.0 = 2x closer (center crop). Max 8.0.",
+                                "minimum": 1.0,
+                                "maximum": 8.0,
+                            },
+                        },
                         "required": [],
                     },
                 ),
@@ -383,7 +390,9 @@ class CameraMCPServer:
             try:
                 match name:
                     case "see":
-                        result = await self._camera.capture_image()
+                        zoom = float(arguments.get("zoom", 1.0))
+                        result = await self._camera.capture_image(zoom=zoom)
+                        zoom_note = f", zoom {zoom:g}x" if zoom > 1.0 else ""
                         return [
                             ImageContent(
                                 type="image",
@@ -392,7 +401,7 @@ class CameraMCPServer:
                             ),
                             TextContent(
                                 type="text",
-                                text=f"Captured image at {result.timestamp} ({result.width}x{result.height})",
+                                text=f"Captured image at {result.timestamp} ({result.width}x{result.height}{zoom_note})",
                             ),
                         ]
 
