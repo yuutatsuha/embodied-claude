@@ -5,12 +5,33 @@ OS 再インストール後、コードを clone/展開して各 MCP の `uv syn
 `env-sensor-mcp/firmware/config.py` / `schedule.conf` / `autonomous-action.sh`）は
 git に入っていないので、別管理のバックアップから先に戻すこと。
 
-## 0. 前提（このリポに無い秘密・魂を先に戻す）
-- `.env`×3（wifi-cam / tts / discord）, `.mcp.json`, `schedule.conf`,
-  `autonomous-action.sh`, `env-sensor-mcp/firmware/config.py`(WiFi),
-  `go2rtc.yaml` … 暗号化スナップショット等から復元。
-- 魂（`~/.claude/memories/memory.db`, `~/.claude/sociality/social.db`,
-  `~/.claude/body/`, 自伝MD）… 同上。
+## 0. 前提（魂＋秘密を暗号スナップショットから先に戻す）
+魂（記憶DB等）と秘密（.env 等）は `backups/embodied-soul-secrets-YYYYMMDD.tar.gz.gpg`
+に **gpg AES256 パスフレーズ暗号**で入っている（中身は平文では git に入れない）。
+パスフレーズはユウタonly（パスワードマネージャ等に保管）。復号＆展開:
+```bash
+cd ~/projects/embodied-claude/backups
+gpg -d --pinentry-mode loopback embodied-soul-secrets-20260610.tar.gz.gpg > /tmp/soul.tar.gz
+mkdir -p /tmp/soul && tar xzf /tmp/soul.tar.gz -C /tmp/soul && ls /tmp/soul
+# soul/ を ~/.claude へ、secrets/ を各所へ戻す:
+cp -a /tmp/soul/soul/memories       ~/.claude/memories
+cp -a /tmp/soul/soul/sociality      ~/.claude/sociality
+cp -a /tmp/soul/soul/body           ~/.claude/body
+cp -a /tmp/soul/soul/captures       ~/.claude/captures
+cp -a /tmp/soul/soul/MOKUROMICHO.md ~/.claude/MOKUROMICHO.md
+mkdir -p ~/.claude/projects/-home-ytsuhako-projects-embodied-claude
+cp -a /tmp/soul/soul/project-memory ~/.claude/projects/-home-ytsuhako-projects-embodied-claude/memory
+cp -a /tmp/soul/secrets/wifi-cam-mcp/.env  wifi-cam-mcp/.env
+cp -a /tmp/soul/secrets/tts-mcp/.env       tts-mcp/.env
+cp -a /tmp/soul/secrets/discord-mcp/.env   discord-mcp/.env
+cp -a /tmp/soul/secrets/.mcp.json          .mcp.json
+cp -a /tmp/soul/secrets/schedule.conf      schedule.conf
+cp -a /tmp/soul/secrets/autonomous-action.sh autonomous-action.sh && chmod +x autonomous-action.sh
+cp -a /tmp/soul/secrets/env-sensor-mcp/firmware/config.py env-sensor-mcp/firmware/config.py
+mkdir -p ~/.cache/embodied-claude/go2rtc && cp -a /tmp/soul/secrets/go2rtc.yaml ~/.cache/embodied-claude/go2rtc/go2rtc.yaml
+rm -rf /tmp/soul /tmp/soul.tar.gz   # 平文を残さない
+```
+> スナップショットは時点コピー。最新化したいときは新しい日付で取り直して push する。
 
 ## 1. VOICEVOX ENGINE（声の合成エンジン :50021）
 外部 ~1.7GB。git にもバックアップにも含めない。GitHub releases から取り直す。
